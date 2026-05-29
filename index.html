@@ -1,341 +1,1031 @@
-<!DOCTYPE html>
-<html>
-<head>
-<title>Monaco Finance AI</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+import { useState, useEffect, useRef, useCallback } from "react";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 
-<style>
-body{
-  background:#000;
-  color:white;
-  font-family:Arial, sans-serif;
-  padding:20px;
-  max-width:1000px;
-  margin:auto;
-}
+// ── WARM DARK PALETTE (original) ──────────────────────────────────────────────
+const C = {
+  bg:    "#0C0A07", bg1: "#111009", bg2: "#1C1610", bg3: "#231A0E",
+  gold:  "#C8A060", goldL: "#DDB87A", goldP: "#EDD9A8", cream: "#F0E6CC",
+  green: "#4CAF7D", red: "#C0392B", blue: "#5B8FD4",
+  gray:  "#7A6E5E", grayL: "#A09080",
+  border:"rgba(200,160,96,0.18)", borderHi:"rgba(200,160,96,0.40)",
+};
 
-h1{
-  color:gold;
-  text-align:center;
-}
+const LR   = {xau:0.90,large:0.65,mid:0.35,small:0.35,cash:1.00,negative:0.00,bond:0.85,structured:0.55,realestate:0.60};
+const FX   = 1.16985;
+const BANKS= ["Moncrief Bank","UBS","Pictet","CFM Indosuez","BNP Paribas","Interactive Brokers","Saxo Bank","Swissquote","Other"];
+const CURS = ["EUR","USD","CHF","GBP","JPY"];
+const CAP_OPTS = [
+  {v:"large",l:"Equity Cap >$1B  →  65%"},{v:"mid",l:"Equity $500M–$1B  →  35%"},
+  {v:"small",l:"Equity <$500M  →  35%"},{v:"xau",l:"Gold / XAU  →  90%"},
+  {v:"bond",l:"Bond  →  85%"},{v:"structured",l:"Structured  →  55%"},
+  {v:"realestate",l:"Real Estate  →  60%"},{v:"cash",l:"Cash  →  100%"},{v:"negative",l:"Debit  →  0%"},
+];
+const CAT_L = {large:"Equity>1B",mid:"Equity 500M+",small:"Equity<500M",xau:"Gold",bond:"Bond",structured:"Structured",realestate:"Real Estate",cash:"Cash",negative:"Debit"};
 
-.card{
-  background:#111;
-  padding:20px;
-  margin:15px 0;
-  border-radius:18px;
-}
+// ── PORTFOLIO DATA with avgCost ───────────────────────────────────────────────
+const INIT = [
+  {id:1, name:"XAU (Gold oz)",             ticker:"XAU",  cat:"xau",     qty:3.22,  price:4500,   avgCost:3200,  cur:"USD", bank:"Moncrief Bank", isin:""},
+  {id:2, name:"EUR Overdraft",             ticker:"",     cat:"negative",qty:0,     price:0,       avgCost:0,     cur:"EUR", bank:"Moncrief Bank", isin:"", fixedVal:-8461.80},
+  {id:3, name:"USD Overdraft",             ticker:"",     cat:"negative",qty:0,     price:0,       avgCost:0,     cur:"EUR", bank:"Moncrief Bank", isin:"", fixedVal:-3335.89},
+  {id:4, name:"Redwire (RDW)",             ticker:"RDW",  cat:"large",   qty:200,   price:25.642,  avgCost:10.12, cur:"USD", bank:"Moncrief Bank", isin:"US7566832034"},
+  {id:5, name:"IonQ (IONQ)",              ticker:"IONQ", cat:"large",   qty:100,   price:71,      avgCost:49.24, cur:"USD", bank:"Moncrief Bank", isin:"US46266C1053"},
+  {id:6, name:"Kyverna Therap. (KYTX)",   ticker:"KYTX", cat:"mid",     qty:100,   price:8.73,    avgCost:11.58, cur:"USD", bank:"Moncrief Bank", isin:"US50155Q1067"},
+  {id:7, name:"Lithium Americas (LAC)",    ticker:"LAC",  cat:"large",   qty:1000,  price:5.245,   avgCost:5.02,  cur:"USD", bank:"Moncrief Bank", isin:"US53680Q2075"},
+  {id:8, name:"Onconetix (ONCO) ×1160",   ticker:"ONCO", cat:"small",   qty:1160,  price:1.29,    avgCost:1.93,  cur:"USD", bank:"Moncrief Bank", isin:"US68237Q3020"},
+];
 
-.grid{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:10px;
-}
+const INIT_RE = [
+  {id:1,name:"Villa Rebecca",location:"Beausoleil, FR",value:9500000,currency:"EUR",ownership:"SCP D&P",bank:"Moncrief Bank",lombard_pct:0.60,status:"Offer Submitted",notes:"€9.5M offer, Moncrief guarantee"},
+  {id:2,name:"Blvd de Tenao",location:"Monaco",value:2800000,currency:"EUR",ownership:"Personal",bank:"Moncrief Bank",lombard_pct:0.60,status:"Development",notes:"Development project"},
+];
+const INIT_STR = [
+  {id:1,name:"Marex Autocall NVDA/TSLA",isin:"XS2845120034",issuer:"Marex",barrier:60,coupon:12.5,maturity:"2027-03-15",underlyings:"NVDA / TSLA",notional:100000,currency:"EUR",bank:"Moncrief Bank",status:"Active"},
+];
 
-input, select{
-  width:100%;
-  padding:12px;
-  margin:5px 0;
-  background:#222;
-  color:white;
-  border:1px solid #444;
-  border-radius:8px;
-  box-sizing:border-box;
-}
+function calcVal(r){ if(r.fixedVal!==undefined)return r.fixedVal; const u=r.qty*r.price; return r.cur==="USD"?u/FX:u; }
+const fe=(v,c=false)=>{const a=Math.abs(v),neg=v<0;let s;if(c){s=a>=1e6?`€${(a/1e6).toFixed(2)}M`:a>=1000?`€${(a/1000).toFixed(1)}K`:`€${a.toFixed(0)}`;}else{s=`€${a.toLocaleString("fr-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}`;}return neg?`−${s}`:s;};
+const fp=(v)=>{const s=v>=0?"+":"";return`${s}${v.toFixed(2)}%`;};
 
-button{
-  background:gold;
-  color:black;
-  font-weight:bold;
-  padding:12px;
-  border:none;
-  border-radius:8px;
-  width:100%;
-  margin-top:10px;
-}
-
-table{
-  width:100%;
-  border-collapse:collapse;
-  margin-top:15px;
-  font-size:14px;
-}
-
-th,td{
-  padding:9px;
-  border-bottom:1px solid #333;
-  text-align:left;
-}
-
-.delete{
-  background:#b00020;
-  color:white;
-  padding:6px 10px;
-  border:none;
-  border-radius:6px;
-}
-
-.summary{
-  display:grid;
-  grid-template-columns:1fr 1fr 1fr;
-  gap:10px;
-}
-
-.box{
-  background:#1a1a1a;
-  padding:15px;
-  border-radius:12px;
-  text-align:center;
-}
-
-.gold{
-  color:gold;
-  font-weight:bold;
-}
-
-.profit{
-  color:#00ff88;
-}
-
-.loss{
-  color:#ff4d4d;
-}
-
-textarea{
-  width:100%;
-  height:120px;
-  background:#222;
-  color:white;
-  border:1px solid #444;
-  border-radius:8px;
-  padding:10px;
-  box-sizing:border-box;
-}
-
-@media(max-width:700px){
-  .grid,.summary{
-    grid-template-columns:1fr;
+// ── GENERATE CHART DATA ───────────────────────────────────────────────────────
+// Creates realistic price history ending at current price
+function genHistory(currentPrice, avgCost, days) {
+  const data = [];
+  const seed = currentPrice * 1000;
+  let price = avgCost * (1 + (Math.random()-0.4)*0.15);
+  const trend = (currentPrice - price) / days;
+  for(let i = 0; i < days; i++){
+    const noise = price * (Math.random()-0.48) * 0.025;
+    price = price + trend + noise;
+    price = Math.max(price, currentPrice * 0.05);
+    const date = new Date();
+    date.setDate(date.getDate() - (days - i));
+    const label = days <= 7
+      ? date.toLocaleDateString("fr-FR",{weekday:"short"})
+      : days <= 31
+      ? date.toLocaleDateString("fr-FR",{day:"numeric",month:"short"})
+      : date.toLocaleDateString("fr-FR",{month:"short",year:"2-digit"});
+    data.push({ date: label, price: parseFloat(price.toFixed(3)), i });
   }
-
-  table{
-    font-size:12px;
-  }
-}
-</style>
-</head>
-
-<body>
-
-<h1>Monaco Finance AI</h1>
-
-<div class="card">
-<h2>Add Position</h2>
-
-<div class="grid">
-<input id="ticker" placeholder="Ticker / Name">
-<input id="isin" placeholder="ISIN">
-<input id="qty" type="number" step="any" placeholder="Quantity">
-<input id="buyPrice" type="number" step="any" placeholder="Purchase Price">
-<input id="currentPrice" type="number" step="any" placeholder="Current Price">
-<input id="bank" placeholder="Bank / Broker">
-<select id="currency">
-  <option value="USD">USD</option>
-  <option value="EUR">EUR</option>
-  <option value="CHF">CHF</option>
-  <option value="GBP">GBP</option>
-</select>
-<select id="assetType">
-  <option value="Stock">Stock</option>
-  <option value="Gold">Gold</option>
-  <option value="Bond">Bond</option>
-  <option value="Structured Product">Structured Product</option>
-  <option value="AMC">AMC</option>
-  <option value="Cash">Cash</option>
-</select>
-</div>
-
-<button onclick="addPosition()">Add Position</button>
-</div>
-
-<div class="card">
-<h2>Portfolio Summary</h2>
-
-<div class="summary">
-<div class="box">
-<div>Total Value</div>
-<div class="gold" id="totalValue">$0</div>
-</div>
-
-<div class="box">
-<div>Total P/L</div>
-<div id="totalPL">$0</div>
-</div>
-
-<div class="box">
-<div>Positions</div>
-<div class="gold" id="positionsCount">0</div>
-</div>
-</div>
-</div>
-
-<div class="card">
-<h2>Portfolio</h2>
-
-<table>
-<thead>
-<tr>
-<th>Ticker</th>
-<th>Type</th>
-<th>ISIN</th>
-<th>Qty</th>
-<th>Buy</th>
-<th>Current</th>
-<th>Value</th>
-<th>P/L</th>
-<th>Bank</th>
-<th></th>
-</tr>
-</thead>
-<tbody id="portfolioBody"></tbody>
-</table>
-</div>
-
-<div class="card">
-<h2>Import / Export Portfolio</h2>
-
-<textarea id="portfolioData" placeholder="Exported portfolio data will appear here"></textarea>
-
-<button onclick="exportPortfolio()">Export Portfolio</button>
-<button onclick="importPortfolio()">Import Portfolio</button>
-<button onclick="clearPortfolio()">Clear All Portfolio</button>
-</div>
-
-<script>
-let portfolio = JSON.parse(localStorage.getItem("portfolio_v2")) || [];
-
-function savePortfolio(){
-  localStorage.setItem("portfolio_v2", JSON.stringify(portfolio));
+  // Force last point to current price
+  data[data.length-1].price = currentPrice;
+  return data;
 }
 
-function formatMoney(value, currency){
-  if(isNaN(value)) return "-";
-  return new Intl.NumberFormat("en-US", {
-    style:"currency",
-    currency: currency || "USD",
-    maximumFractionDigits:2
-  }).format(value);
+// ── MINI CHART COMPONENT ──────────────────────────────────────────────────────
+function PriceChart({ data, avgCost, color }){
+  const min = Math.min(...data.map(d=>d.price)) * 0.99;
+  const max = Math.max(...data.map(d=>d.price)) * 1.01;
+  const CustomTooltip = ({active,payload,label})=>{
+    if(!active||!payload?.length) return null;
+    return <div style={{background:C.bg3,border:`1px solid ${C.borderHi}`,borderRadius:6,padding:"6px 10px",fontSize:10}}>
+      <div style={{color:C.grayL,marginBottom:2}}>{label}</div>
+      <div style={{color:C.goldL,fontWeight:700}}>${payload[0].value.toFixed(3)}</div>
+    </div>;
+  };
+  return(
+    <ResponsiveContainer width="100%" height={160}>
+      <LineChart data={data} margin={{top:8,right:8,bottom:0,left:0}}>
+        <XAxis dataKey="date" tick={{fill:C.gray,fontSize:8}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
+        <YAxis domain={[min,max]} tick={{fill:C.gray,fontSize:8}} tickLine={false} axisLine={false}
+          tickFormatter={v=>`$${v.toFixed(1)}`} width={48}/>
+        <Tooltip content={<CustomTooltip/>}/>
+        <ReferenceLine y={avgCost} stroke={C.gold} strokeDasharray="4 3" strokeWidth={1}
+          label={{value:`Avg $${avgCost}`,fill:C.gold,fontSize:8,position:"insideTopRight"}}/>
+        <Line type="monotone" dataKey="price" stroke={color} strokeWidth={2}
+          dot={false} activeDot={{r:4,fill:color,strokeWidth:0}}/>
+      </LineChart>
+    </ResponsiveContainer>
+  );
 }
 
-function addPosition(){
-  const position = {
-    ticker: document.getElementById("ticker").value.trim().toUpperCase(),
-    isin: document.getElementById("isin").value.trim().toUpperCase(),
-    qty: parseFloat(document.getElementById("qty").value) || 0,
-    buyPrice: parseFloat(document.getElementById("buyPrice").value) || 0,
-    currentPrice: parseFloat(document.getElementById("currentPrice").value) || 0,
-    bank: document.getElementById("bank").value.trim(),
-    currency: document.getElementById("currency").value,
-    assetType: document.getElementById("assetType").value
+// ── POSITION DETAIL DRAWER ────────────────────────────────────────────────────
+function PositionDetail({ row, onClose }){
+  const [tf, setTf] = useState("1M");
+  const tfDays = {"1W":7,"1M":30,"1Y":365};
+  const chartColor = row.price >= row.avgCost ? C.green : C.red;
+  const pnlPct = row.avgCost > 0 ? ((row.price - row.avgCost) / row.avgCost) * 100 : 0;
+  const pnlEur = row.qty > 0 ? (row.price - row.avgCost) * row.qty / FX : 0;
+  const data = genHistory(row.price, row.avgCost, tfDays[tf]);
+  const tfChange = ((row.price - data[0].price) / data[0].price) * 100;
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",
+      alignItems:"flex-end",justifyContent:"center",zIndex:300}} onClick={onClose}>
+      <div style={{background:C.bg2,border:`1px solid ${C.borderHi}`,borderRadius:"16px 16px 0 0",
+        padding:"20px 20px 28px",width:"100%",maxWidth:520,maxHeight:"80vh",overflowY:"auto"}}
+        onClick={e=>e.stopPropagation()}>
+
+        {/* DRAG HANDLE */}
+        <div style={{width:36,height:4,borderRadius:2,background:C.gray,margin:"0 auto 16px",opacity:0.4}}/>
+
+        {/* HEADER */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+          <div>
+            <div style={{fontSize:16,fontWeight:700,color:C.cream,fontFamily:"'Palatino Linotype',Georgia,serif"}}>{row.name}</div>
+            <div style={{fontSize:10,color:C.gray,marginTop:2}}>{row.ticker&&`${row.ticker} · `}{row.isin||""} · {row.bank}</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:C.gray,cursor:"pointer",fontSize:20,lineHeight:1}}>✕</button>
+        </div>
+
+        {/* PRICE + PNL */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:16}}>
+          {[
+            {l:"Current Price",v:`$${row.price}`,col:C.goldL},
+            {l:"Avg Cost",v:`$${row.avgCost}`,col:C.grayL},
+            {l:`P&L (${tf})`,v:fp(tfChange),col:tfChange>=0?C.green:C.red},
+          ].map((k,i)=>(
+            <div key={i} style={{background:C.bg3,borderRadius:8,padding:"10px 12px",border:`1px solid ${C.border}`}}>
+              <div style={{fontSize:8,color:C.gray,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:4}}>{k.l}</div>
+              <div style={{fontSize:15,fontWeight:700,color:k.col}}>{k.v}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* TOTAL PNL VS AVG COST */}
+        {row.qty>0&&row.avgCost>0&&(
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+            <div style={{background:pnlPct>=0?"rgba(76,175,125,0.10)":"rgba(192,57,43,0.10)",
+              borderRadius:8,padding:"10px 12px",border:`1px solid ${pnlPct>=0?"rgba(76,175,125,0.30)":"rgba(192,57,43,0.30)"}`}}>
+              <div style={{fontSize:8,color:C.gray,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:4}}>P&L vs Avg Cost</div>
+              <div style={{fontSize:18,fontWeight:700,color:pnlPct>=0?C.green:C.red}}>{fp(pnlPct)}</div>
+            </div>
+            <div style={{background:"rgba(200,160,96,0.08)",borderRadius:8,padding:"10px 12px",border:`1px solid ${C.border}`}}>
+              <div style={{fontSize:8,color:C.gray,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:4}}>P&L Amount</div>
+              <div style={{fontSize:18,fontWeight:700,color:pnlPct>=0?C.green:C.red}}>{(pnlEur>=0?"+":"")+fe(pnlEur)}</div>
+            </div>
+          </div>
+        )}
+
+        {/* TIMEFRAME SELECTOR */}
+        <div style={{display:"flex",gap:6,marginBottom:12}}>
+          {["1W","1M","1Y"].map(t=>(
+            <button key={t} onClick={()=>setTf(t)} style={{
+              padding:"5px 16px",borderRadius:20,border:`1px solid ${t===tf?C.gold:C.border}`,
+              background:t===tf?`linear-gradient(135deg,${C.gold},${C.goldL})`:"transparent",
+              color:t===tf?C.bg:C.grayL,fontSize:11,fontWeight:t===tf?700:400,
+              cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
+              {t}
+            </button>
+          ))}
+        </div>
+
+        {/* CHART */}
+        <div style={{background:C.bg,borderRadius:10,padding:"12px 4px 4px",border:`1px solid ${C.border}`}}>
+          <PriceChart data={data} avgCost={row.avgCost} color={chartColor}/>
+          <div style={{textAlign:"center",fontSize:8,color:C.gray,marginTop:4,paddingBottom:4}}>
+            Dashed line = avg cost ${row.avgCost} · Chart illustrative
+          </div>
+        </div>
+
+        {/* POSITION STATS */}
+        {row.qty>0&&(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:12}}>
+            {[
+              {l:"Quantity",v:row.qty.toLocaleString()},
+              {l:"Value EUR",v:fe(row.value||calcVal(row),true)},
+              {l:`Lombard (${Math.round(LR[row.cat]*100)}%)`,v:fe(Math.max(0,(row.value||calcVal(row)))*LR[row.cat],true)},
+              {l:"Total Cost EUR",v:fe(row.avgCost*row.qty/FX,true)},
+              {l:"Category",v:CAT_L[row.cat]||row.cat},
+              {l:"Currency",v:row.cur},
+            ].map((k,i)=>(
+              <div key={i} style={{background:C.bg3,borderRadius:7,padding:"8px 10px"}}>
+                <div style={{fontSize:8,color:C.gray,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:3}}>{k.l}</div>
+                <div style={{fontSize:11,color:C.cream,fontWeight:600}}>{k.v}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── TAG ───────────────────────────────────────────────────────────────────────
+function Tag({cat}){
+  const cols={xau:C.gold,large:C.blue,mid:"#8A6FBF",small:C.gray,bond:C.green,structured:"#C08040",realestate:"#40A0A0",cash:C.green,negative:C.red};
+  return <span style={{background:`${cols[cat]||C.gray}20`,border:`1px solid ${cols[cat]||C.gray}45`,
+    borderRadius:4,padding:"2px 7px",fontSize:9,color:cols[cat]||C.gray,letterSpacing:"0.04em",
+    display:"inline-block",whiteSpace:"nowrap"}}>{CAT_L[cat]||cat}</span>;
+}
+function PctBar({pct,col=C.gold}){
+  return <div style={{height:4,borderRadius:2,background:"rgba(200,160,96,0.07)",overflow:"hidden"}}>
+    <div style={{height:"100%",width:`${Math.min(pct*100,100)}%`,background:`linear-gradient(90deg,${col},${C.goldL})`,borderRadius:2,transition:"width .6s"}}/>
+  </div>;
+}
+function KPI({label,value,sub,col=C.gold}){
+  return <div style={{background:C.bg2,border:`1px solid ${C.border}`,borderRadius:12,padding:"13px 15px",borderTop:`2px solid ${col}`}}>
+    <div style={{fontSize:9,color:C.gray,letterSpacing:"0.16em",textTransform:"uppercase",marginBottom:5}}>{label}</div>
+    <div style={{fontSize:20,fontWeight:700,color:col,lineHeight:1,fontFamily:"'Palatino Linotype',Georgia,serif"}}>{value}</div>
+    {sub&&<div style={{fontSize:9,color:C.grayL,marginTop:4}}>{sub}</div>}
+  </div>;
+}
+function Modal({title,onClose,children}){
+  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.82)",display:"flex",
+    alignItems:"center",justifyContent:"center",zIndex:200}} onClick={onClose}>
+    <div style={{background:C.bg2,border:`1px solid ${C.borderHi}`,borderRadius:16,padding:"22px",
+      width:"92%",maxWidth:420,maxHeight:"88vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:15}}>
+        <div style={{fontSize:10,color:C.gold,letterSpacing:"0.18em",textTransform:"uppercase",fontWeight:700}}>{title}</div>
+        <button onClick={onClose} style={{background:"none",border:"none",color:C.gray,cursor:"pointer",fontSize:18,lineHeight:1}}>✕</button>
+      </div>
+      {children}
+    </div>
+  </div>;
+}
+const INP={width:"100%",background:C.bg,border:`1px solid ${C.border}`,borderRadius:7,padding:"9px 12px",
+  color:C.cream,fontSize:13,fontFamily:"inherit",outline:"none",boxSizing:"border-box",marginBottom:8};
+const GBTN={background:`linear-gradient(135deg,${C.gold},${C.goldL})`,color:C.bg,border:"none",
+  borderRadius:8,padding:"8px 18px",fontSize:11,fontWeight:700,cursor:"pointer",letterSpacing:"0.07em",fontFamily:"inherit"};
+
+// ═════════════════════════════════════════════════════════════════════════════
+export default function App(){
+  const [tab,setTab]           = useState("dashboard");
+  const [rows,setRows]         = useState(()=>INIT.map(r=>({...r,value:calcVal(r),prevPrice:r.price})));
+  const [realestate,setRE]     = useState(INIT_RE);
+  const [structured,setSTR]    = useState(INIT_STR);
+  const [detail,setDetail]     = useState(null);   // selected position for detail view
+  const [editRow,setEditRow]   = useState(null);
+  const [showAdd,setShowAdd]   = useState(null);
+  const [newItem,setNewItem]   = useState({});
+  const [priceLoading,setPL]   = useState(false);
+  const [lastUpdate,setLU]     = useState("29.05.2026 19:00");
+  const [msgs,setMsgs]         = useState([{role:"assistant",
+    text:"Bonjour. Monaco Finance AI connected.\n\nTap any position to see price chart, avg cost, and P&L. Use ⟳ Live Prices to refresh all quotes.\n\nAsk me about Lombard strategy, specific positions, or credit scenarios.\n\n— Monaco Finance AI"}]);
+  const [query,setQuery]       = useState("");
+  const [aiLoading,setAIL]     = useState(false);
+  const [simLTV,setSimLTV]     = useState(70);
+  const [simRate,setSimRate]   = useState(1.2);
+  const endRef                 = useRef(null);
+
+  const gross    = rows.filter(r=>r.value>0).reduce((s,r)=>s+r.value,0);
+  const net      = rows.reduce((s,r)=>s+r.value,0);
+  const lombF    = rows.reduce((s,r)=>s+Math.max(0,r.value)*LR[r.cat],0);
+  const reTotal  = realestate.reduce((s,r)=>s+(r.currency==="USD"?r.value/FX:r.value),0);
+  const reLomb   = realestate.reduce((s,r)=>s+(r.currency==="USD"?r.value/FX:r.value)*r.lombard_pct,0);
+  const strTotal = structured.reduce((s,r)=>s+(r.currency==="USD"?r.notional/FX:r.notional),0);
+  const strLomb  = strTotal*0.55;
+  const totalA   = gross+reTotal+strTotal;
+  const totalL   = lombF+reLomb+strLomb;
+  const liquidity= totalL*0.85;
+  const credit   = totalL*(simLTV/100);
+  const anCost   = credit*(simRate/100);
+
+  // Total P&L vs avg cost
+  const totalPnL = rows.filter(r=>r.qty>0&&r.avgCost>0)
+    .reduce((s,r)=>s+(r.price-r.avgCost)*r.qty/FX, 0);
+  const totalCost = rows.filter(r=>r.qty>0&&r.avgCost>0)
+    .reduce((s,r)=>s+r.avgCost*r.qty/FX, 0);
+  const totalPnLPct = totalCost > 0 ? (totalPnL/totalCost)*100 : 0;
+
+  // Refresh live prices
+  const refreshPrices = async() => {
+    setPL(true);
+    const tickers = rows.filter(r=>r.ticker).map(r=>r.ticker).join(", ");
+    try{
+      const res = await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,
+          tools:[{type:"web_search_20250305",name:"web_search"}],
+          system:`Return ONLY JSON {"TICKER":price}. XAU=gold spot per troy oz USD. No text.`,
+          messages:[{role:"user",content:`Current prices: ${tickers}. ONLY JSON.`}]})
+      });
+      const d=await res.json();
+      const txt=d.content.filter(b=>b.type==="text").map(b=>b.text).join("");
+      const m=txt.match(/\{[^{}]+\}/);
+      if(m){
+        const prices=JSON.parse(m[0]);
+        setRows(prev=>prev.map(r=>{
+          if(!r.ticker||!prices[r.ticker])return r;
+          const np=parseFloat(prices[r.ticker]);
+          if(isNaN(np)||np<=0)return r;
+          return{...r,price:np,prevPrice:r.price,value:calcVal({...r,price:np})};
+        }));
+        const now=new Date();
+        setLU(`${now.getDate().toString().padStart(2,"0")}.${(now.getMonth()+1).toString().padStart(2,"0")}.${now.getFullYear()} ${now.getHours().toString().padStart(2,"0")}:${now.getMinutes().toString().padStart(2,"0")}`);
+        setMsgs(m=>[...m,{role:"assistant",text:`Prices updated:\n${Object.entries(prices).map(([t,p])=>`${t}: $${p}`).join(" · ")}\n— Monaco Finance AI`}]);
+      }
+    }catch{setMsgs(m=>[...m,{role:"assistant",text:"Refresh failed.\n— Monaco Finance AI"}]);}
+    setPL(false);
   };
 
-  if(!position.ticker || position.qty <= 0){
-    alert("Enter ticker and quantity");
-    return;
-  }
+  // AI chat
+  const sendAI = async() => {
+    if(!query.trim()||aiLoading)return;
+    const q=query.trim();setQuery("");setMsgs(m=>[...m,{role:"user",text:q}]);setAIL(true);
+    const ps=rows.map(r=>`${r.name}(${r.cat},L${Math.round(LR[r.cat]*100)}%):${fe(r.value,true)}${r.ticker?`@$${r.price}avg$${r.avgCost}qty${r.qty}`:""}`).join(";");
+    const re2=realestate.map(r=>`${r.name}:€${(r.value/1e6).toFixed(1)}M`).join(";");
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,
+          tools:[{type:"web_search_20250305",name:"web_search"}],
+          system:`Monaco Finance AI — elite private banking advisor, Moncrief Bank Monaco. Concise, max 5 paragraphs, no emojis. Calculate precisely when asked about Lombard/credit.
+Portfolio(${lastUpdate}): ${ps}
+Real Estate: ${re2} | Structured: €${fe(strTotal,true)}
+Totals: Gross ${fe(gross,true)} | Lombard ${fe(totalL,true)} | Liquidity ${fe(liquidity,true)} | Total P&L ${(totalPnLPct>=0?"+":"")+totalPnLPct.toFixed(1)}%
+FX:1USD=${(1/FX).toFixed(4)}EUR. Sign:— Monaco Finance AI`,
+          messages:[...msgs.filter((_,i)=>i>0).map(m=>({role:m.role,content:m.text})),{role:"user",content:q}]})
+      });
+      const d=await res.json();
+      setMsgs(m=>[...m,{role:"assistant",text:d.content.filter(b=>b.type==="text").map(b=>b.text).join("")||"Unavailable."}]);
+    }catch{setMsgs(m=>[...m,{role:"assistant",text:"Connection error."}]);}
+    setAIL(false);
+  };
 
-  portfolio.push(position);
-  savePortfolio();
-  renderPortfolio();
-  clearInputs();
+  useEffect(()=>{endRef.current?.scrollIntoView({behavior:"smooth"})},[msgs]);
+
+  const card={background:C.bg2,border:`1px solid ${C.border}`,borderRadius:12,padding:"15px 17px"};
+  const sec={fontSize:9,color:C.gold,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:11,fontWeight:700};
+  const TH={color:C.gray,fontSize:9,letterSpacing:"0.09em",textTransform:"uppercase",textAlign:"left",paddingBottom:7,borderBottom:`1px solid ${C.border}`};
+  const TD={padding:"9px 3px",borderBottom:`1px solid rgba(200,160,96,0.05)`,verticalAlign:"middle"};
+
+  const TABS=[
+    {id:"dashboard",l:"Dashboard"},{id:"portfolio",l:"Portfolio"},
+    {id:"realestate",l:"Real Estate"},{id:"structured",l:"Structured"},
+    {id:"lombard",l:"Lombard"},{id:"simulator",l:"Simulator"},{id:"ai",l:"AI Advisor"}
+  ];
+
+  return(
+    <div style={{minHeight:"100vh",background:C.bg,color:C.cream,
+      fontFamily:"'Palatino Linotype',Palatino,Georgia,serif",display:"flex",flexDirection:"column"}}>
+
+      {/* HEADER */}
+      <div style={{background:C.bg1,borderBottom:`1px solid ${C.border}`,padding:"11px 18px",
+        display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,
+        position:"sticky",top:0,zIndex:100}}>
+        <div style={{display:"flex",alignItems:"center",gap:14}}>
+          <div>
+            <div style={{fontSize:15,fontWeight:700,color:C.gold,letterSpacing:"0.13em",textTransform:"uppercase"}}>Monaco Finance AI</div>
+            <div style={{fontSize:8,color:C.gray,letterSpacing:"0.15em",textTransform:"uppercase",marginTop:1}}>Moncrief Bank · CLI_V001 · {lastUpdate}</div>
+          </div>
+          <button onClick={refreshPrices} disabled={priceLoading} style={{
+            background:priceLoading?"rgba(200,160,96,0.04)":"rgba(200,160,96,0.10)",
+            border:`1px solid ${C.borderHi}`,borderRadius:7,padding:"5px 13px",
+            color:priceLoading?C.gray:C.goldL,fontSize:10,cursor:priceLoading?"not-allowed":"pointer",
+            fontFamily:"inherit",letterSpacing:"0.05em"}}>
+            {priceLoading?"⟳ Loading…":"⟳ Live Prices"}
+          </button>
+        </div>
+        <nav style={{display:"flex",gap:2,background:C.bg3,borderRadius:9,padding:3,flexWrap:"wrap"}}>
+          {TABS.map(t=>(
+            <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"5px 11px",borderRadius:7,border:"none",
+              cursor:"pointer",fontSize:10,letterSpacing:"0.04em",fontFamily:"inherit",
+              background:tab===t.id?`linear-gradient(135deg,${C.gold},${C.goldL})`:"transparent",
+              color:tab===t.id?C.bg:C.gray,fontWeight:tab===t.id?700:400,transition:"all .2s"}}>
+              {t.l}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      <div style={{flex:1,padding:"14px 17px",overflowY:"auto"}}>
+
+        {/* ── DASHBOARD ───────────────────────────────────────────────────── */}
+        {tab==="dashboard"&&(<>
+
+          {/* ── HERO BANNER ─────────────────────────────────────────────── */}
+          <div style={{
+            position:"relative",borderRadius:16,overflow:"hidden",
+            marginBottom:14,minHeight:220,
+            border:`1px solid ${C.borderHi}`,
+          }}>
+            {/* REAL MONACO PHOTO */}
+            <div style={{
+              position:"absolute",inset:0,
+              backgroundImage:"url('https://images.unsplash.com/photo-1566806925366-46c8926ec71c?w=1400&q=85&auto=format&fit=crop')",
+              backgroundSize:"cover",backgroundPosition:"center 40%",
+              filter:"brightness(0.52) saturate(1.1)",
+            }}/>
+            {/* dark overlay gradient — keeps text readable */}
+            <div style={{position:"absolute",inset:0,
+              background:"linear-gradient(160deg,rgba(5,10,25,0.72) 0%,rgba(8,16,40,0.55) 50%,rgba(5,10,20,0.80) 100%)"}}/>
+            {/* gold shimmer bottom edge */}
+            <div style={{position:"absolute",bottom:0,left:0,right:0,height:2,
+              background:`linear-gradient(90deg,transparent,${C.gold},transparent)`}}/>
+            {/* CONTENT */}
+            <div style={{position:"relative",zIndex:2,padding:"22px 24px",display:"flex",
+              alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+              <div>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+                  <div style={{width:32,height:32,borderRadius:8,
+                    background:`linear-gradient(135deg,${C.gold},${C.goldL})`,
+                    display:"flex",alignItems:"center",justifyContent:"center",
+                    fontSize:14,fontWeight:700,color:C.bg,flexShrink:0}}>M</div>
+                  <div>
+                    <div style={{fontSize:16,fontWeight:700,color:C.gold,
+                      letterSpacing:"0.14em",textTransform:"uppercase",
+                      fontFamily:"'Palatino Linotype',Palatino,Georgia,serif",
+                      textShadow:`0 0 20px rgba(200,160,96,0.4)`}}>
+                      Monaco Finance International
+                    </div>
+                    <div style={{fontSize:8,color:C.grayL,letterSpacing:"0.22em",textTransform:"uppercase",marginTop:1}}>
+                      Where Wealth Meets Intelligence
+                    </div>
+                  </div>
+                </div>
+                <div style={{fontSize:10,color:C.grayL,letterSpacing:"0.04em",lineHeight:1.7,marginBottom:10}}>
+                  Independent Wealth Structuring&nbsp;&nbsp;·&nbsp;&nbsp;Lombard Finance&nbsp;&nbsp;·&nbsp;&nbsp;Structured Products&nbsp;&nbsp;·&nbsp;&nbsp;Real Estate
+                </div>
+                <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+                  {[
+                    {icon:"✉",text:"pavel@monaco-finance.com"},
+                    {icon:"🌐",text:"monacofinanceinternational.com"},
+                  ].map((item,i)=>(
+                    <div key={i} style={{display:"flex",alignItems:"center",gap:5,fontSize:9,color:C.gray}}>
+                      <span style={{fontSize:10}}>{item.icon}</span>
+                      <span>{item.text}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:8,alignItems:"flex-end"}}>
+                <button style={{
+                  background:`linear-gradient(135deg,${C.gold},${C.goldL})`,
+                  color:C.bg,border:"none",borderRadius:9,padding:"10px 20px",
+                  fontSize:11,fontWeight:700,cursor:"pointer",letterSpacing:"0.07em",
+                  fontFamily:"inherit",whiteSpace:"nowrap",
+                  boxShadow:`0 4px 20px rgba(200,160,96,0.30)`}}>
+                  Request Consultation →
+                </button>
+                <div style={{fontSize:8,color:C.gray,textAlign:"right"}}>
+                  {["Assets","Banking","Real Estate","AI"].join("  ·  ")}
+                </div>
+                {/* LOMBARD CTA */}
+                {totalL>50000&&(
+                  <div style={{background:"rgba(200,160,96,0.09)",border:`1px solid ${C.border}`,
+                    borderRadius:8,padding:"8px 12px",textAlign:"right",maxWidth:200}}>
+                    <div style={{fontSize:8,color:C.gray,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:3}}>Available Credit Estimate</div>
+                    <div style={{fontSize:14,color:C.green,fontWeight:700}}>{fe(liquidity,true)}</div>
+                    <div style={{fontSize:8,color:C.gray,marginTop:2}}>Based on your portfolio</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(145px,1fr))",gap:10,marginBottom:13}}>
+            <KPI label="Total Assets" value={fe(totalA,true)} sub="Financial + RE + Structured"/>
+            <KPI label="Gross Financial" value={fe(gross,true)} sub="Positive positions" col={C.goldL}/>
+            <KPI label="Total Lombard" value={fe(totalL,true)} sub={`${Math.round(totalL/totalA*100)}% of assets`} col={C.blue}/>
+            <KPI label="Available Liquidity" value={fe(liquidity,true)} sub="Without selling" col={C.green}/>
+            <KPI label="Total P&L" value={(totalPnLPct>=0?"+":"")+totalPnLPct.toFixed(1)+"%"}
+              sub={(totalPnL>=0?"+":"")+fe(totalPnL,true)+" vs avg cost"} col={totalPnL>=0?C.green:C.red}/>
+            <KPI label="Real Estate" value={fe(reTotal,true)} sub={`${realestate.length} properties`} col="#40A0A0"/>
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1.9fr 1fr",gap:12}}>
+            <div style={card}>
+              <div style={sec}>Positions — Tap for Detail</div>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr>
+                  <th style={TH}>Position</th>
+                  <th style={{...TH,textAlign:"right"}}>Price / Avg</th>
+                  <th style={{...TH,textAlign:"right"}}>P&L</th>
+                  <th style={{...TH,textAlign:"right"}}>Value €</th>
+                </tr></thead>
+                <tbody>
+                  {rows.filter(r=>r.value!==0).sort((a,b)=>b.value-a.value).map(r=>{
+                    const pnlPct = r.avgCost>0&&r.qty>0 ? ((r.price-r.avgCost)/r.avgCost)*100 : null;
+                    return(
+                      <tr key={r.id} onClick={()=>r.ticker&&setDetail(r)}
+                        style={{cursor:r.ticker?"pointer":"default",transition:"background .15s"}}
+                        onMouseEnter={e=>{if(r.ticker)e.currentTarget.style.background="rgba(200,160,96,0.05)"}}
+                        onMouseLeave={e=>{e.currentTarget.style.background="transparent"}}>
+                        <td style={TD}>
+                          <div style={{fontWeight:600,color:C.cream,fontSize:11}}>{r.name}</div>
+                          <Tag cat={r.cat}/>
+                        </td>
+                        <td style={{...TD,textAlign:"right"}}>
+                          {r.price?<>
+                            <div style={{fontSize:11,color:C.goldL,fontWeight:600}}>${r.price}</div>
+                            {r.avgCost>0&&<div style={{fontSize:9,color:C.gray}}>avg ${r.avgCost}</div>}
+                          </>:<span style={{fontSize:10,color:C.grayL}}>{fe(r.fixedVal||0)}</span>}
+                        </td>
+                        <td style={{...TD,textAlign:"right"}}>
+                          {pnlPct!==null&&(
+                            <span style={{fontSize:11,color:pnlPct>=0?C.green:C.red,fontWeight:600}}>
+                              {fp(pnlPct)}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{...TD,textAlign:"right",color:r.value<0?C.red:C.goldL,fontWeight:600,fontSize:11}}>
+                          {fe(r.value)}
+                          {r.ticker&&<div style={{fontSize:9,color:C.gray}}>tap for chart</div>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <div style={card}>
+                <div style={sec}>Lombard by Class</div>
+                {[
+                  {l:"Financial",v:lombF,t:gross,col:C.gold},
+                  {l:"Real Estate",v:reLomb,t:reTotal,col:"#40A0A0"},
+                  {l:"Structured",v:strLomb,t:strTotal,col:"#C08040"},
+                ].map((item,i)=>(
+                  <div key={i} style={{marginBottom:9}}>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:3}}>
+                      <span style={{color:C.grayL}}>{item.l}</span>
+                      <span style={{color:C.green,fontWeight:600}}>{fe(item.v,true)}</span>
+                    </div>
+                    <PctBar pct={item.v/item.t} col={item.col}/>
+                  </div>
+                ))}
+                <div style={{marginTop:10,paddingTop:8,borderTop:`1px solid ${C.border}`,
+                  display:"flex",justifyContent:"space-between"}}>
+                  <span style={{fontSize:9,color:C.gray}}>TOTAL</span>
+                  <span style={{fontSize:13,color:C.gold,fontWeight:700}}>{fe(totalL,true)}</span>
+                </div>
+              </div>
+
+              <div style={card}>
+                <div style={sec}>P&L by Position</div>
+                {rows.filter(r=>r.qty>0&&r.avgCost>0).sort((a,b)=>b.value-a.value).map(r=>{
+                  const p=((r.price-r.avgCost)/r.avgCost)*100;
+                  return <div key={r.id} style={{display:"flex",justifyContent:"space-between",
+                    alignItems:"center",marginBottom:7,cursor:"pointer"}}
+                    onClick={()=>setDetail(r)}>
+                    <span style={{fontSize:10,color:C.grayL,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.ticker}</span>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:11,color:p>=0?C.green:C.red,fontWeight:700}}>{fp(p)}</div>
+                      <div style={{fontSize:9,color:C.gray}}>${r.avgCost}→${r.price}</div>
+                    </div>
+                  </div>;
+                })}
+              </div>
+            </div>
+          </div>
+        </>)}
+
+        {/* ── PORTFOLIO ───────────────────────────────────────────────────── */}
+        {tab==="portfolio"&&(<>
+          <div style={{marginBottom:11,background:"rgba(200,160,96,0.05)",border:`1px solid ${C.border}`,
+            borderRadius:9,padding:"9px 14px",display:"flex",gap:18,flexWrap:"wrap"}}>
+            {[["Tap row","Open price chart + P&L"],["✎","Edit qty, price, avg cost"],["✕","Remove"],["⟳ Live","Auto-refresh prices"]].map(([k,v])=>(
+              <div key={k} style={{fontSize:10,color:C.grayL}}><span style={{color:C.goldL,fontWeight:600}}>{k}</span>  {v}</div>
+            ))}
+          </div>
+          <div style={card}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={sec}>All Positions · Moncrief Bank</div>
+              <button style={GBTN} onClick={()=>{setNewItem({name:"",ticker:"",isin:"",cat:"large",qty:"",price:"",avgCost:"",cur:"USD",bank:"Moncrief Bank"});setShowAdd("portfolio");}}>+ Add</button>
+            </div>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+              <thead><tr>
+                <th style={TH}>Name / ISIN</th>
+                <th style={TH}>Cat</th>
+                <th style={{...TH,textAlign:"right"}}>Qty</th>
+                <th style={{...TH,textAlign:"right"}}>Price</th>
+                <th style={{...TH,textAlign:"right"}}>Avg Cost</th>
+                <th style={{...TH,textAlign:"right"}}>P&L %</th>
+                <th style={{...TH,textAlign:"right"}}>Value €</th>
+                <th style={{...TH,textAlign:"right"}}>Lombard</th>
+                <th style={TH}></th>
+              </tr></thead>
+              <tbody>
+                {rows.map(r=>{
+                  const pnl=r.avgCost>0&&r.qty>0?((r.price-r.avgCost)/r.avgCost)*100:null;
+                  return(
+                    <tr key={r.id} onClick={()=>r.ticker&&setDetail(r)}
+                      style={{cursor:r.ticker?"pointer":"default"}}
+                      onMouseEnter={e=>{if(r.ticker)e.currentTarget.style.background="rgba(200,160,96,0.04)"}}
+                      onMouseLeave={e=>{e.currentTarget.style.background="transparent"}}>
+                      <td style={TD}>
+                        <div style={{fontWeight:600,color:C.cream}}>{r.name}</div>
+                        {r.isin&&<div style={{fontSize:8,color:C.gray}}>{r.isin}</div>}
+                      </td>
+                      <td style={TD}><Tag cat={r.cat}/></td>
+                      <td style={{...TD,textAlign:"right",color:C.grayL}}>{r.qty||"—"}</td>
+                      <td style={{...TD,textAlign:"right",color:C.goldL,fontWeight:600}}>{r.price?`$${r.price}`:"—"}</td>
+                      <td style={{...TD,textAlign:"right",color:C.gray,fontSize:10}}>{r.avgCost>0?`$${r.avgCost}`:"—"}</td>
+                      <td style={{...TD,textAlign:"right",fontWeight:600,fontSize:11}}>
+                        {pnl!==null&&<span style={{color:pnl>=0?C.green:C.red}}>{fp(pnl)}</span>}
+                      </td>
+                      <td style={{...TD,textAlign:"right",color:r.value<0?C.red:C.goldL,fontWeight:600}}>{fe(r.value)}</td>
+                      <td style={{...TD,textAlign:"right",color:r.value>0?C.green:C.gray,fontSize:10}}>
+                        {r.value>0?fe(r.value*LR[r.cat]):"—"}
+                      </td>
+                      <td style={{...TD,textAlign:"right"}} onClick={e=>e.stopPropagation()}>
+                        <button onClick={()=>setEditRow(r)}
+                          style={{background:"rgba(200,160,96,0.1)",border:`1px solid ${C.border}`,color:C.goldL,
+                            borderRadius:5,padding:"3px 7px",fontSize:10,cursor:"pointer",marginRight:3}}>✎</button>
+                        <button onClick={()=>setRows(p=>p.filter(x=>x.id!==r.id))}
+                          style={{background:"rgba(192,57,43,0.1)",border:"1px solid rgba(192,57,43,0.3)",color:C.red,
+                            borderRadius:5,padding:"3px 7px",fontSize:10,cursor:"pointer"}}>✕</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <div style={{marginTop:11,paddingTop:9,borderTop:`1px solid ${C.borderHi}`,
+              display:"flex",justifyContent:"flex-end",gap:20,alignItems:"center"}}>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:8,color:C.gray,letterSpacing:"0.09em",textTransform:"uppercase"}}>Net Total</div>
+                <div style={{fontSize:16,color:C.gold,fontWeight:700}}>{fe(net)}</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:8,color:C.gray,letterSpacing:"0.09em",textTransform:"uppercase"}}>Total P&L</div>
+                <div style={{fontSize:16,color:totalPnL>=0?C.green:C.red,fontWeight:700}}>
+                  {(totalPnL>=0?"+":"")+fe(totalPnL,true)} ({fp(totalPnLPct)})
+                </div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:8,color:C.gray,letterSpacing:"0.09em",textTransform:"uppercase"}}>Lombard</div>
+                <div style={{fontSize:16,color:C.green,fontWeight:700}}>{fe(lombF)}</div>
+              </div>
+            </div>
+          </div>
+        </>)}
+
+        {/* ── REAL ESTATE ─────────────────────────────────────────────────── */}
+        {tab==="realestate"&&(<>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(145px,1fr))",gap:10,marginBottom:13}}>
+            <KPI label="Total RE Value" value={fe(reTotal,true)} col={C.gold}/>
+            <KPI label="Lombard (60%)" value={fe(reLomb,true)} col={C.green}/>
+            <KPI label="Properties" value={`${realestate.length}`} col="#40A0A0"/>
+          </div>
+          <div style={card}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:13}}>
+              <div style={sec}>Real Estate Portfolio</div>
+              <button style={GBTN} onClick={()=>{setNewItem({name:"",location:"",value:"",currency:"EUR",ownership:"",bank:"Moncrief Bank",lombard_pct:0.60,status:"Active",notes:""});setShowAdd("realestate");}}>+ Add</button>
+            </div>
+            {realestate.map(r=>(
+              <div key={r.id} style={{marginBottom:12,padding:"13px 15px",background:C.bg3,borderRadius:10,border:`1px solid ${C.border}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:700,color:C.cream}}>{r.name}</div>
+                    <div style={{fontSize:9,color:C.gray,marginTop:2}}>{r.location} · {r.ownership}</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:15,color:C.gold,fontWeight:700}}>€{(r.value/1e6).toFixed(2)}M</div>
+                    <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(74,143,212,0.15)",color:C.blue}}>{r.status}</span>
+                  </div>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:6}}>
+                  {[{l:"Lombard Rate",v:`${Math.round(r.lombard_pct*100)}%`},{l:"Lombard Value",v:`€${((r.value*r.lombard_pct)/1e6).toFixed(2)}M`},{l:"Custodian",v:r.bank},{l:"Currency",v:r.currency}].map((k,i)=>(
+                    <div key={i} style={{background:C.bg2,borderRadius:6,padding:"7px 9px"}}>
+                      <div style={{fontSize:8,color:C.gray,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:3}}>{k.l}</div>
+                      <div style={{fontSize:11,color:C.goldL,fontWeight:600}}>{k.v}</div>
+                    </div>
+                  ))}
+                </div>
+                {r.notes&&<div style={{fontSize:9,color:C.gray,fontStyle:"italic"}}>{r.notes}</div>}
+                <div style={{display:"flex",justifyContent:"flex-end",gap:6,marginTop:8}}>
+                  <button onClick={()=>setRE(p=>p.filter(x=>x.id!==r.id))}
+                    style={{background:"rgba(192,57,43,0.08)",border:"1px solid rgba(192,57,43,0.25)",color:C.red,borderRadius:5,padding:"4px 10px",fontSize:9,cursor:"pointer"}}>✕ Remove</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>)}
+
+        {/* ── STRUCTURED ──────────────────────────────────────────────────── */}
+        {tab==="structured"&&(<>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(145px,1fr))",gap:10,marginBottom:13}}>
+            <KPI label="Total Notional" value={fe(strTotal,true)} col={C.gold}/>
+            <KPI label="Lombard (55%)" value={fe(strLomb,true)} col={C.green}/>
+            <KPI label="Products" value={`${structured.length}`} col="#C08040"/>
+          </div>
+          <div style={card}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:13}}>
+              <div style={sec}>Structured Products</div>
+              <button style={GBTN} onClick={()=>{setNewItem({name:"",isin:"",issuer:"",barrier:60,coupon:10,maturity:"",underlyings:"",notional:"",currency:"EUR",bank:"Moncrief Bank",status:"Active"});setShowAdd("structured");}}>+ Add</button>
+            </div>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+              <thead><tr>
+                <th style={TH}>Name / ISIN</th>
+                <th style={TH}>Issuer</th>
+                <th style={{...TH,textAlign:"center"}}>Barrier</th>
+                <th style={{...TH,textAlign:"center"}}>Coupon</th>
+                <th style={TH}>Maturity</th>
+                <th style={TH}>Underlyings</th>
+                <th style={{...TH,textAlign:"right"}}>Notional</th>
+                <th style={{...TH,textAlign:"right"}}>Lombard</th>
+                <th style={TH}></th>
+              </tr></thead>
+              <tbody>
+                {structured.map(r=>(
+                  <tr key={r.id}>
+                    <td style={TD}>
+                      <div style={{fontWeight:600,color:C.cream}}>{r.name}</div>
+                      <div style={{fontSize:8,color:C.gray}}>{r.isin}</div>
+                    </td>
+                    <td style={{...TD,color:C.grayL,fontSize:10}}>{r.issuer}</td>
+                    <td style={{...TD,textAlign:"center"}}>
+                      <span style={{color:r.barrier<50?C.red:r.barrier<70?C.goldL:C.green,fontWeight:600}}>{r.barrier}%</span>
+                    </td>
+                    <td style={{...TD,textAlign:"center",color:C.green,fontWeight:600}}>{r.coupon}%</td>
+                    <td style={{...TD,color:C.grayL,fontSize:9}}>{r.maturity}</td>
+                    <td style={{...TD,color:C.grayL,fontSize:9}}>{r.underlyings}</td>
+                    <td style={{...TD,textAlign:"right",color:C.goldL,fontWeight:600}}>{fe(r.currency==="USD"?r.notional/FX:r.notional)}</td>
+                    <td style={{...TD,textAlign:"right",color:C.green,fontWeight:600}}>{fe((r.currency==="USD"?r.notional/FX:r.notional)*0.55)}</td>
+                    <td style={{...TD,textAlign:"right"}}>
+                      <button onClick={()=>setSTR(p=>p.filter(x=>x.id!==r.id))}
+                        style={{background:"none",border:"none",color:C.gray,cursor:"pointer",fontSize:12}}>✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>)}
+
+        {/* ── LOMBARD ─────────────────────────────────────────────────────── */}
+        {tab==="lombard"&&(<>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(145px,1fr))",gap:10,marginBottom:13}}>
+            <KPI label="Total Assets" value={fe(totalA,true)} col={C.gold}/>
+            <KPI label="Total Lombard" value={fe(totalL,true)} col={C.blue}/>
+            <KPI label="Liquidity (85%)" value={fe(liquidity,true)} col={C.green}/>
+            <KPI label="LTV Ratio" value={`${Math.round(totalL/totalA*100)}%`} col={C.goldL}/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1.8fr",gap:12}}>
+            <div style={card}>
+              <div style={sec}>Asset Classes</div>
+              {[{l:"Financial",v:lombF,t:gross,col:C.gold},{l:"Real Estate",v:reLomb,t:reTotal,col:"#40A0A0"},{l:"Structured",v:strLomb,t:strTotal,col:"#C08040"}].map((item,i)=>(
+                <div key={i} style={{marginBottom:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:4}}>
+                    <span style={{color:C.cream,fontWeight:600}}>{item.l}</span>
+                    <span style={{color:C.green,fontWeight:700}}>{fe(item.v,true)}</span>
+                  </div>
+                  <PctBar pct={item.v/item.t} col={item.col}/>
+                  <div style={{display:"flex",justifyContent:"space-between",marginTop:2,fontSize:9,color:C.gray}}>
+                    <span>Assets: {fe(item.t,true)}</span><span>Rate: {Math.round(item.v/item.t*100)}%</span>
+                  </div>
+                </div>
+              ))}
+              <div style={{marginTop:10,paddingTop:9,borderTop:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:9,color:C.gray}}>TOTAL LOMBARD</span>
+                <span style={{fontSize:17,color:C.gold,fontWeight:700}}>{fe(totalL,true)}</span>
+              </div>
+            </div>
+            <div style={card}>
+              <div style={sec}>Financial Position Detail</div>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+                <thead><tr>
+                  <th style={TH}>Position</th>
+                  <th style={{...TH,textAlign:"center"}}>Rate</th>
+                  <th style={{...TH,textAlign:"right"}}>Value €</th>
+                  <th style={{...TH,textAlign:"right"}}>Lombard €</th>
+                </tr></thead>
+                <tbody>
+                  {rows.filter(r=>r.value>0).sort((a,b)=>b.value-a.value).map(r=>(
+                    <tr key={r.id}>
+                      <td style={{...TD,color:C.cream,fontWeight:500,fontSize:10}}>{r.name}</td>
+                      <td style={{...TD,textAlign:"center"}}>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:4}}>
+                          <div style={{width:34,height:4,borderRadius:2,background:"rgba(200,160,96,0.08)",overflow:"hidden"}}>
+                            <div style={{height:"100%",width:`${LR[r.cat]*100}%`,background:C.gold,borderRadius:2}}/>
+                          </div>
+                          <span style={{fontSize:9,color:C.goldL,fontWeight:600}}>{Math.round(LR[r.cat]*100)}%</span>
+                        </div>
+                      </td>
+                      <td style={{...TD,textAlign:"right",color:C.cream}}>{fe(r.value)}</td>
+                      <td style={{...TD,textAlign:"right",color:C.green,fontWeight:600}}>{fe(r.value*LR[r.cat])}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td colSpan={3} style={{...TD,textAlign:"right",color:C.gray,fontSize:9}}>TOTAL FINANCIAL LOMBARD</td>
+                    <td style={{...TD,textAlign:"right",color:C.gold,fontWeight:700,fontSize:13}}>{fe(lombF)}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div style={{marginTop:10,padding:"10px 12px",background:"rgba(200,160,96,0.04)",border:`1px solid ${C.border}`,borderRadius:8}}>
+                <div style={{fontSize:9,color:C.gold,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:4,fontWeight:700}}>Moncrief Bank Terms</div>
+                <div style={{fontSize:9,color:C.gray,lineHeight:1.9}}>EURIBOR+1.2% · Min €250K · Margin call LTV&gt;90% · 1st rank pledge · 3–5 days</div>
+              </div>
+            </div>
+          </div>
+        </>)}
+
+        {/* ── SIMULATOR ───────────────────────────────────────────────────── */}
+        {tab==="simulator"&&(<>
+          <div style={{marginBottom:11,padding:"10px 14px",background:"rgba(200,160,96,0.04)",border:`1px solid ${C.border}`,borderRadius:9}}>
+            <div style={{fontSize:9,color:C.gold,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:3,fontWeight:700}}>Lombard Credit Simulator · Purely Analytical</div>
+            <div style={{fontSize:9,color:C.gray}}>No lending · No custody · No regulated advice</div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:13}}>
+            {[{l:"Credit Amount",v:fe(credit,true),col:C.goldL},{l:"Annual Cost",v:fe(anCost,true),col:C.cream},{l:"Monthly Cost",v:fe(anCost/12,true),col:C.cream},{l:"Net Liquidity",v:fe(credit-anCost,true),col:C.green}].map((k,i)=>(
+              <div key={i} style={{...card,background:"rgba(200,160,96,0.06)",border:`1px solid ${C.borderHi}`}}>
+                <div style={{fontSize:9,color:C.gray,letterSpacing:"0.13em",textTransform:"uppercase",marginBottom:4}}>{k.l}</div>
+                <div style={{fontSize:21,fontWeight:700,color:k.col,fontFamily:"'Palatino Linotype',Georgia,serif"}}>{k.v}</div>
+              </div>
+            ))}
+          </div>
+          <div style={card}>
+            <div style={sec}>Adjust Parameters</div>
+            {[
+              {label:"Loan-to-Value (LTV)",val:simLTV,set:setSimLTV,min:10,max:85,step:5,fmt:v=>`${v}%`,lo:"10% Conservative",hi:"85% Max"},
+              {label:"Interest Rate p.a.",val:simRate,set:setSimRate,min:0.5,max:4.0,step:0.1,fmt:v=>`${v.toFixed(1)}%`,lo:"0.5% Best",hi:"4.0% Standard"},
+            ].map((s,i)=>(
+              <div key={i} style={{marginBottom:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                  <span style={{fontSize:11,color:C.grayL}}>{s.label}</span>
+                  <span style={{fontSize:12,color:C.goldL,fontWeight:700}}>{s.fmt(s.val)}</span>
+                </div>
+                <input type="range" min={s.min} max={s.max} step={s.step} value={s.val}
+                  onChange={e=>s.set(parseFloat(e.target.value))} style={{width:"100%",accentColor:C.gold}}/>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:8,color:C.gray,marginTop:1}}>
+                  <span>{s.lo}</span><span>{s.hi}</span>
+                </div>
+              </div>
+            ))}
+            <div style={{background:C.bg,borderRadius:9,padding:"13px",border:`1px solid ${C.border}`}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,textAlign:"center"}}>
+                {[{l:"Lombard Base",v:fe(totalL,true)},{l:`Credit ${simLTV}%`,v:fe(credit,true)},{l:"Annual Cost",v:fe(anCost,true)},{l:"Monthly Cost",v:fe(anCost/12,true)},{l:"Net Available",v:fe(credit-anCost,true)},{l:"Portfolio LTV",v:`${Math.round(credit/totalA*100)}%`}].map((item,i)=>(
+                  <div key={i} style={{padding:"6px 3px"}}>
+                    <div style={{fontSize:8,color:C.gray,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:3}}>{item.l}</div>
+                    <div style={{fontSize:12,color:C.goldL,fontWeight:700}}>{item.v}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </>)}
+
+        {/* ── AI ADVISOR ──────────────────────────────────────────────────── */}
+        {tab==="ai"&&(
+          <div style={{...card,display:"flex",flexDirection:"column",height:"calc(100vh - 160px)"}}>
+            <div style={sec}>Monaco Finance AI · Wealth Advisor · Live Search</div>
+            <div style={{marginBottom:9,display:"flex",gap:5,flexWrap:"wrap"}}>
+              {["Analyse Lombard capacity","Gold strategy","ONCO position","IonQ outlook","Credit scenario €500K"].map(q=>(
+                <button key={q} onClick={()=>setQuery(q)} style={{background:"rgba(200,160,96,0.07)",
+                  border:`1px solid ${C.border}`,borderRadius:16,padding:"4px 11px",
+                  fontSize:10,color:C.goldL,cursor:"pointer",fontFamily:"inherit"}}>{q}</button>
+              ))}
+            </div>
+            <div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column",gap:10,padding:"4px 0"}}>
+              {msgs.map((m,i)=>(
+                <div key={i} style={{maxWidth:"84%",alignSelf:m.role==="user"?"flex-end":"flex-start",
+                  background:m.role==="user"?"rgba(200,160,96,0.09)":C.bg3,
+                  border:m.role==="user"?`1px solid ${C.borderHi}`:`1px solid rgba(200,160,96,0.07)`,
+                  borderRadius:m.role==="user"?"12px 12px 0 12px":"12px 12px 12px 0",
+                  padding:"9px 13px",fontSize:11,lineHeight:1.75,color:m.role==="user"?C.goldP:C.cream}}>
+                  {m.role==="assistant"&&<div style={{fontSize:8,color:C.gold,letterSpacing:"0.12em",marginBottom:3,textTransform:"uppercase"}}>Monaco Finance AI</div>}
+                  <div style={{whiteSpace:"pre-wrap"}}>{m.text}</div>
+                </div>
+              ))}
+              {aiLoading&&<div style={{maxWidth:"84%",background:C.bg3,borderRadius:"12px 12px 12px 0",padding:"9px 13px",fontSize:11}}>
+                <div style={{fontSize:8,color:C.gold,letterSpacing:"0.12em",marginBottom:3,textTransform:"uppercase"}}>Monaco Finance AI</div>
+                <span style={{color:C.gray}}>Analysing…</span>
+              </div>}
+              <div ref={endRef}/>
+            </div>
+            <div style={{display:"flex",gap:7,padding:"10px 0 0",borderTop:`1px solid ${C.border}`}}>
+              <input style={{...INP,flex:1,marginBottom:0}}
+                placeholder="Ask about portfolio, Lombard, credit scenarios, specific positions…"
+                value={query} onChange={e=>setQuery(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&sendAI()}/>
+              <button style={GBTN} onClick={sendAI} disabled={aiLoading}>{aiLoading?"…":"Send"}</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── POSITION DETAIL DRAWER ────────────────────────────────────────── */}
+      {detail&&<PositionDetail row={detail} onClose={()=>setDetail(null)}/>}
+
+      {/* ── ADD PORTFOLIO MODAL ───────────────────────────────────────────── */}
+      {showAdd==="portfolio"&&(
+        <Modal title="Add Position" onClose={()=>setShowAdd(null)}>
+          {[{ph:"Name",key:"name"},{ph:"Ticker (e.g. TSLA)",key:"ticker"},{ph:"ISIN",key:"isin"}].map(f=>(
+            <input key={f.key} style={INP} placeholder={f.ph} value={newItem[f.key]||""}
+              onChange={e=>setNewItem(p=>({...p,[f.key]:f.key==="ticker"?e.target.value.toUpperCase():e.target.value}))}/>
+          ))}
+          <select style={INP} value={newItem.cat||"large"} onChange={e=>setNewItem(p=>({...p,cat:e.target.value}))}>
+            {CAP_OPTS.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
+          </select>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7}}>
+            <input style={INP} placeholder="Qty" type="number" value={newItem.qty||""}
+              onChange={e=>setNewItem(p=>({...p,qty:e.target.value}))}/>
+            <input style={INP} placeholder="Price" type="number" value={newItem.price||""}
+              onChange={e=>setNewItem(p=>({...p,price:e.target.value}))}/>
+            <input style={INP} placeholder="Avg Cost" type="number" value={newItem.avgCost||""}
+              onChange={e=>setNewItem(p=>({...p,avgCost:e.target.value}))}/>
+          </div>
+          <select style={INP} value={newItem.cur||"USD"} onChange={e=>setNewItem(p=>({...p,cur:e.target.value}))}>
+            {CURS.map(c=><option key={c} value={c}>{c}</option>)}
+          </select>
+          <select style={INP} value={newItem.bank||"Moncrief Bank"} onChange={e=>setNewItem(p=>({...p,bank:e.target.value}))}>
+            {BANKS.map(b=><option key={b} value={b}>{b}</option>)}
+          </select>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}>
+            <button style={{background:"transparent",color:C.gray,border:`1px solid ${C.gray}`,
+              borderRadius:8,padding:"7px 14px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}
+              onClick={()=>setShowAdd(null)}>Cancel</button>
+            <button style={GBTN} onClick={()=>{
+              if(!newItem.name||!newItem.qty||!newItem.price)return;
+              const qty=parseFloat(newItem.qty),price=parseFloat(newItem.price),avg=parseFloat(newItem.avgCost)||0;
+              const val=newItem.cur==="USD"?qty*price/FX:qty*price;
+              setRows(p=>[...p,{id:Date.now(),...newItem,qty,price,avgCost:avg,value:val,prevPrice:price,isin:newItem.isin||""}]);
+              setShowAdd(null);
+            }}>Add</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── EDIT MODAL ────────────────────────────────────────────────────── */}
+      {editRow&&(
+        <Modal title="Edit Position" onClose={()=>setEditRow(null)}>
+          <input style={INP} placeholder="Name" value={editRow.name}
+            onChange={e=>setEditRow(p=>({...p,name:e.target.value}))}/>
+          <input style={INP} placeholder="Ticker" value={editRow.ticker||""}
+            onChange={e=>setEditRow(p=>({...p,ticker:e.target.value.toUpperCase()}))}/>
+          <input style={INP} placeholder="ISIN" value={editRow.isin||""}
+            onChange={e=>setEditRow(p=>({...p,isin:e.target.value}))}/>
+          <select style={INP} value={editRow.cat} onChange={e=>setEditRow(p=>({...p,cat:e.target.value}))}>
+            {CAP_OPTS.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
+          </select>
+          {editRow.fixedVal!==undefined?(
+            <input style={INP} placeholder="Balance EUR" type="number" value={editRow.fixedVal}
+              onChange={e=>setEditRow(p=>({...p,fixedVal:parseFloat(e.target.value)}))}/>
+          ):(
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7}}>
+              <input style={INP} placeholder="Qty" type="number" value={editRow.qty}
+                onChange={e=>setEditRow(p=>({...p,qty:parseFloat(e.target.value)}))}/>
+              <input style={INP} placeholder="Price" type="number" value={editRow.price}
+                onChange={e=>setEditRow(p=>({...p,price:parseFloat(e.target.value)}))}/>
+              <input style={INP} placeholder="Avg Cost" type="number" value={editRow.avgCost||""}
+                onChange={e=>setEditRow(p=>({...p,avgCost:parseFloat(e.target.value)}))}/>
+            </div>
+          )}
+          <select style={INP} value={editRow.bank||"Moncrief Bank"}
+            onChange={e=>setEditRow(p=>({...p,bank:e.target.value}))}>
+            {BANKS.map(b=><option key={b} value={b}>{b}</option>)}
+          </select>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}>
+            <button style={{background:"transparent",color:C.gray,border:`1px solid ${C.gray}`,
+              borderRadius:8,padding:"7px 14px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}
+              onClick={()=>setEditRow(null)}>Cancel</button>
+            <button style={GBTN} onClick={()=>{
+              const updated={...editRow,value:calcVal(editRow)};
+              setRows(p=>p.map(r=>r.id===updated.id?updated:r));
+              setEditRow(null);
+            }}>Save</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── ADD RE MODAL ─────────────────────────────────────────────────── */}
+      {showAdd==="realestate"&&(
+        <Modal title="Add Property" onClose={()=>setShowAdd(null)}>
+          {[{ph:"Property name",key:"name"},{ph:"Location",key:"location"},{ph:"Market value",key:"value",t:"number"},{ph:"Ownership entity",key:"ownership"},{ph:"Notes",key:"notes"}].map(f=>(
+            <input key={f.key} style={INP} placeholder={f.ph} type={f.t||"text"}
+              value={newItem[f.key]||""} onChange={e=>setNewItem(p=>({...p,[f.key]:e.target.value}))}/>
+          ))}
+          <select style={INP} value={newItem.currency||"EUR"} onChange={e=>setNewItem(p=>({...p,currency:e.target.value}))}>
+            {CURS.map(c=><option key={c}>{c}</option>)}
+          </select>
+          <select style={INP} value={newItem.status||"Active"} onChange={e=>setNewItem(p=>({...p,status:e.target.value}))}>
+            {["Active","Development","Offer Submitted","Under Contract","For Sale"].map(s=><option key={s}>{s}</option>)}
+          </select>
+          <select style={INP} value={newItem.bank||"Moncrief Bank"} onChange={e=>setNewItem(p=>({...p,bank:e.target.value}))}>
+            {BANKS.map(b=><option key={b}>{b}</option>)}
+          </select>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}>
+            <button style={{background:"transparent",color:C.gray,border:`1px solid ${C.gray}`,borderRadius:8,padding:"7px 14px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setShowAdd(null)}>Cancel</button>
+            <button style={GBTN} onClick={()=>{
+              if(!newItem.name||!newItem.value)return;
+              setRE(p=>[...p,{id:Date.now(),...newItem,value:parseFloat(newItem.value),lombard_pct:0.60}]);
+              setShowAdd(null);
+            }}>Add</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── ADD STRUCTURED MODAL ─────────────────────────────────────────── */}
+      {showAdd==="structured"&&(
+        <Modal title="Add Structured Product" onClose={()=>setShowAdd(null)}>
+          {[{ph:"Product name",key:"name"},{ph:"ISIN",key:"isin"},{ph:"Issuer",key:"issuer"},{ph:"Underlyings (e.g. NVDA/TSLA)",key:"underlyings"},{ph:"Maturity (YYYY-MM-DD)",key:"maturity"},{ph:"Notional amount",key:"notional",t:"number"}].map(f=>(
+            <input key={f.key} style={INP} placeholder={f.ph} type={f.t||"text"}
+              value={newItem[f.key]||""} onChange={e=>setNewItem(p=>({...p,[f.key]:e.target.value}))}/>
+          ))}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
+            <input style={INP} placeholder="Barrier %" type="number" value={newItem.barrier||""}
+              onChange={e=>setNewItem(p=>({...p,barrier:parseFloat(e.target.value)}))}/>
+            <input style={INP} placeholder="Coupon %" type="number" value={newItem.coupon||""}
+              onChange={e=>setNewItem(p=>({...p,coupon:parseFloat(e.target.value)}))}/>
+          </div>
+          <select style={INP} value={newItem.currency||"EUR"} onChange={e=>setNewItem(p=>({...p,currency:e.target.value}))}>
+            {CURS.map(c=><option key={c}>{c}</option>)}
+          </select>
+          <select style={INP} value={newItem.bank||"Moncrief Bank"} onChange={e=>setNewItem(p=>({...p,bank:e.target.value}))}>
+            {BANKS.map(b=><option key={b}>{b}</option>)}
+          </select>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}>
+            <button style={{background:"transparent",color:C.gray,border:`1px solid ${C.gray}`,borderRadius:8,padding:"7px 14px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setShowAdd(null)}>Cancel</button>
+            <button style={GBTN} onClick={()=>{
+              if(!newItem.name||!newItem.notional)return;
+              setSTR(p=>[...p,{id:Date.now(),...newItem,notional:parseFloat(newItem.notional),status:"Active"}]);
+              setShowAdd(null);
+            }}>Add</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
 }
-
-function clearInputs(){
-  document.getElementById("ticker").value = "";
-  document.getElementById("isin").value = "";
-  document.getElementById("qty").value = "";
-  document.getElementById("buyPrice").value = "";
-  document.getElementById("currentPrice").value = "";
-  document.getElementById("bank").value = "";
-}
-
-function removePosition(index){
-  portfolio.splice(index,1);
-  savePortfolio();
-  renderPortfolio();
-}
-
-function renderPortfolio(){
-  const body = document.getElementById("portfolioBody");
-  body.innerHTML = "";
-
-  let totalValue = 0;
-  let totalCost = 0;
-
-  portfolio.forEach((p,index)=>{
-    const cost = p.qty * p.buyPrice;
-    const value = p.qty * p.currentPrice;
-    const pl = value - cost;
-
-    totalValue += value;
-    totalCost += cost;
-
-    const plClass = pl >= 0 ? "profit" : "loss";
-
-    body.innerHTML += `
-      <tr>
-        <td>${p.ticker}</td>
-        <td>${p.assetType}</td>
-        <td>${p.isin}</td>
-        <td>${p.qty}</td>
-        <td>${formatMoney(p.buyPrice,p.currency)}</td>
-        <td>${formatMoney(p.currentPrice,p.currency)}</td>
-        <td>${formatMoney(value,p.currency)}</td>
-        <td class="${plClass}">${formatMoney(pl,p.currency)}</td>
-        <td>${p.bank}</td>
-        <td><button class="delete" onclick="removePosition(${index})">X</button></td>
-      </tr>
-    `;
-  });
-
-  const totalPL = totalValue - totalCost;
-
-  document.getElementById("totalValue").innerText = formatMoney(totalValue,"USD");
-  document.getElementById("totalPL").innerText = formatMoney(totalPL,"USD");
-  document.getElementById("totalPL").className = totalPL >= 0 ? "profit" : "loss";
-  document.getElementById("positionsCount").innerText = portfolio.length;
-}
-
-function exportPortfolio(){
-  document.getElementById("portfolioData").value =
-    JSON.stringify(portfolio,null,2);
-}
-
-function importPortfolio(){
-  try{
-    const data = JSON.parse(document.getElementById("portfolioData").value);
-    if(Array.isArray(data)){
-      portfolio = data;
-      savePortfolio();
-      renderPortfolio();
-      alert("Portfolio imported");
-    } else {
-      alert("Invalid data");
-    }
-  } catch(e){
-    alert("Import error");
-  }
-}
-
-function clearPortfolio(){
-  if(confirm("Delete all portfolio data?")){
-    portfolio = [];
-    savePortfolio();
-    renderPortfolio();
-  }
-}
-
-renderPortfolio();
-</script>
-
-</body>
-</html>
