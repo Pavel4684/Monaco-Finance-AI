@@ -6,66 +6,120 @@
 
 <style>
 body{
-background:#000;
-color:white;
-font-family:Arial;
-padding:20px;
-max-width:900px;
-margin:auto;
+  background:#000;
+  color:white;
+  font-family:Arial, sans-serif;
+  padding:20px;
+  max-width:1000px;
+  margin:auto;
 }
 
 h1{
-color:gold;
-text-align:center;
+  color:gold;
+  text-align:center;
 }
 
 .card{
-background:#111;
-padding:20px;
-margin:15px 0;
-border-radius:15px;
+  background:#111;
+  padding:20px;
+  margin:15px 0;
+  border-radius:18px;
 }
 
-input{
-width:100%;
-padding:12px;
-margin:5px 0;
-background:#222;
-color:white;
-border:1px solid #444;
-border-radius:8px;
-box-sizing:border-box;
+.grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
+
+input, select{
+  width:100%;
+  padding:12px;
+  margin:5px 0;
+  background:#222;
+  color:white;
+  border:1px solid #444;
+  border-radius:8px;
+  box-sizing:border-box;
 }
 
 button{
-background:gold;
-color:black;
-font-weight:bold;
-padding:12px;
-border:none;
-border-radius:8px;
-width:100%;
-margin-top:10px;
+  background:gold;
+  color:black;
+  font-weight:bold;
+  padding:12px;
+  border:none;
+  border-radius:8px;
+  width:100%;
+  margin-top:10px;
 }
 
 table{
-width:100%;
-border-collapse:collapse;
-margin-top:15px;
+  width:100%;
+  border-collapse:collapse;
+  margin-top:15px;
+  font-size:14px;
 }
 
 th,td{
-padding:10px;
-border-bottom:1px solid #333;
-text-align:left;
+  padding:9px;
+  border-bottom:1px solid #333;
+  text-align:left;
 }
 
 .delete{
-background:#b00020;
-color:white;
-padding:5px 10px;
-border:none;
-border-radius:5px;
+  background:#b00020;
+  color:white;
+  padding:6px 10px;
+  border:none;
+  border-radius:6px;
+}
+
+.summary{
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  gap:10px;
+}
+
+.box{
+  background:#1a1a1a;
+  padding:15px;
+  border-radius:12px;
+  text-align:center;
+}
+
+.gold{
+  color:gold;
+  font-weight:bold;
+}
+
+.profit{
+  color:#00ff88;
+}
+
+.loss{
+  color:#ff4d4d;
+}
+
+textarea{
+  width:100%;
+  height:120px;
+  background:#222;
+  color:white;
+  border:1px solid #444;
+  border-radius:8px;
+  padding:10px;
+  box-sizing:border-box;
+}
+
+@media(max-width:700px){
+  .grid,.summary{
+    grid-template-columns:1fr;
+  }
+
+  table{
+    font-size:12px;
+  }
 }
 </style>
 </head>
@@ -75,125 +129,212 @@ border-radius:5px;
 <h1>Monaco Finance AI</h1>
 
 <div class="card">
-
 <h2>Add Position</h2>
 
-<input id="ticker" placeholder="Ticker">
+<div class="grid">
+<input id="ticker" placeholder="Ticker / Name">
 <input id="isin" placeholder="ISIN">
-<input id="qty" placeholder="Quantity">
-<input id="price" placeholder="Purchase Price">
-<input id="bank" placeholder="Bank">
+<input id="qty" type="number" step="any" placeholder="Quantity">
+<input id="buyPrice" type="number" step="any" placeholder="Purchase Price">
+<input id="currentPrice" type="number" step="any" placeholder="Current Price">
+<input id="bank" placeholder="Bank / Broker">
+<select id="currency">
+  <option value="USD">USD</option>
+  <option value="EUR">EUR</option>
+  <option value="CHF">CHF</option>
+  <option value="GBP">GBP</option>
+</select>
+<select id="assetType">
+  <option value="Stock">Stock</option>
+  <option value="Gold">Gold</option>
+  <option value="Bond">Bond</option>
+  <option value="Structured Product">Structured Product</option>
+  <option value="AMC">AMC</option>
+  <option value="Cash">Cash</option>
+</select>
+</div>
 
-<button onclick="addPosition()">
-Add Position
-</button>
-
+<button onclick="addPosition()">Add Position</button>
 </div>
 
 <div class="card">
+<h2>Portfolio Summary</h2>
 
+<div class="summary">
+<div class="box">
+<div>Total Value</div>
+<div class="gold" id="totalValue">$0</div>
+</div>
+
+<div class="box">
+<div>Total P/L</div>
+<div id="totalPL">$0</div>
+</div>
+
+<div class="box">
+<div>Positions</div>
+<div class="gold" id="positionsCount">0</div>
+</div>
+</div>
+</div>
+
+<div class="card">
 <h2>Portfolio</h2>
 
-<table id="portfolioTable">
+<table>
 <thead>
 <tr>
 <th>Ticker</th>
+<th>Type</th>
 <th>ISIN</th>
 <th>Qty</th>
-<th>Price</th>
+<th>Buy</th>
+<th>Current</th>
+<th>Value</th>
+<th>P/L</th>
 <th>Bank</th>
 <th></th>
 </tr>
 </thead>
-<tbody></tbody>
+<tbody id="portfolioBody"></tbody>
 </table>
+</div>
 
+<div class="card">
+<h2>Import / Export Portfolio</h2>
+
+<textarea id="portfolioData" placeholder="Exported portfolio data will appear here"></textarea>
+
+<button onclick="exportPortfolio()">Export Portfolio</button>
+<button onclick="importPortfolio()">Import Portfolio</button>
+<button onclick="clearPortfolio()">Clear All Portfolio</button>
 </div>
 
 <script>
-
-let portfolio =
-JSON.parse(localStorage.getItem("portfolio")) || [];
+let portfolio = JSON.parse(localStorage.getItem("portfolio_v2")) || [];
 
 function savePortfolio(){
-localStorage.setItem(
-"portfolio",
-JSON.stringify(portfolio)
-);
+  localStorage.setItem("portfolio_v2", JSON.stringify(portfolio));
 }
 
-function renderPortfolio(){
-
-let tbody =
-document.querySelector(
-"#portfolioTable tbody"
-);
-
-tbody.innerHTML="";
-
-portfolio.forEach((item,index)=>{
-
-tbody.innerHTML += `
-<tr>
-<td>${item.ticker}</td>
-<td>${item.isin}</td>
-<td>${item.qty}</td>
-<td>${item.price}</td>
-<td>${item.bank}</td>
-<td>
-<button class="delete"
-onclick="removePosition(${index})">
-X
-</button>
-</td>
-</tr>
-`;
-
-});
-
+function formatMoney(value, currency){
+  if(isNaN(value)) return "-";
+  return new Intl.NumberFormat("en-US", {
+    style:"currency",
+    currency: currency || "USD",
+    maximumFractionDigits:2
+  }).format(value);
 }
 
 function addPosition(){
+  const position = {
+    ticker: document.getElementById("ticker").value.trim().toUpperCase(),
+    isin: document.getElementById("isin").value.trim().toUpperCase(),
+    qty: parseFloat(document.getElementById("qty").value) || 0,
+    buyPrice: parseFloat(document.getElementById("buyPrice").value) || 0,
+    currentPrice: parseFloat(document.getElementById("currentPrice").value) || 0,
+    bank: document.getElementById("bank").value.trim(),
+    currency: document.getElementById("currency").value,
+    assetType: document.getElementById("assetType").value
+  };
 
-portfolio.push({
-ticker:
-document.getElementById("ticker").value,
+  if(!position.ticker || position.qty <= 0){
+    alert("Enter ticker and quantity");
+    return;
+  }
 
-isin:
-document.getElementById("isin").value,
+  portfolio.push(position);
+  savePortfolio();
+  renderPortfolio();
+  clearInputs();
+}
 
-qty:
-document.getElementById("qty").value,
-
-price:
-document.getElementById("price").value,
-
-bank:
-document.getElementById("bank").value
-});
-
-savePortfolio();
-renderPortfolio();
-
-document.getElementById("ticker").value="";
-document.getElementById("isin").value="";
-document.getElementById("qty").value="";
-document.getElementById("price").value="";
-document.getElementById("bank").value="";
+function clearInputs(){
+  document.getElementById("ticker").value = "";
+  document.getElementById("isin").value = "";
+  document.getElementById("qty").value = "";
+  document.getElementById("buyPrice").value = "";
+  document.getElementById("currentPrice").value = "";
+  document.getElementById("bank").value = "";
 }
 
 function removePosition(index){
+  portfolio.splice(index,1);
+  savePortfolio();
+  renderPortfolio();
+}
 
-portfolio.splice(index,1);
+function renderPortfolio(){
+  const body = document.getElementById("portfolioBody");
+  body.innerHTML = "";
 
-savePortfolio();
+  let totalValue = 0;
+  let totalCost = 0;
 
-renderPortfolio();
+  portfolio.forEach((p,index)=>{
+    const cost = p.qty * p.buyPrice;
+    const value = p.qty * p.currentPrice;
+    const pl = value - cost;
 
+    totalValue += value;
+    totalCost += cost;
+
+    const plClass = pl >= 0 ? "profit" : "loss";
+
+    body.innerHTML += `
+      <tr>
+        <td>${p.ticker}</td>
+        <td>${p.assetType}</td>
+        <td>${p.isin}</td>
+        <td>${p.qty}</td>
+        <td>${formatMoney(p.buyPrice,p.currency)}</td>
+        <td>${formatMoney(p.currentPrice,p.currency)}</td>
+        <td>${formatMoney(value,p.currency)}</td>
+        <td class="${plClass}">${formatMoney(pl,p.currency)}</td>
+        <td>${p.bank}</td>
+        <td><button class="delete" onclick="removePosition(${index})">X</button></td>
+      </tr>
+    `;
+  });
+
+  const totalPL = totalValue - totalCost;
+
+  document.getElementById("totalValue").innerText = formatMoney(totalValue,"USD");
+  document.getElementById("totalPL").innerText = formatMoney(totalPL,"USD");
+  document.getElementById("totalPL").className = totalPL >= 0 ? "profit" : "loss";
+  document.getElementById("positionsCount").innerText = portfolio.length;
+}
+
+function exportPortfolio(){
+  document.getElementById("portfolioData").value =
+    JSON.stringify(portfolio,null,2);
+}
+
+function importPortfolio(){
+  try{
+    const data = JSON.parse(document.getElementById("portfolioData").value);
+    if(Array.isArray(data)){
+      portfolio = data;
+      savePortfolio();
+      renderPortfolio();
+      alert("Portfolio imported");
+    } else {
+      alert("Invalid data");
+    }
+  } catch(e){
+    alert("Import error");
+  }
+}
+
+function clearPortfolio(){
+  if(confirm("Delete all portfolio data?")){
+    portfolio = [];
+    savePortfolio();
+    renderPortfolio();
+  }
 }
 
 renderPortfolio();
-
 </script>
 
 </body>
