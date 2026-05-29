@@ -3,22 +3,69 @@
 <head>
 <title>Monaco Finance AI</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+
 <style>
 body{
-background:black;
+background:#000;
 color:white;
 font-family:Arial;
-text-align:center;
-padding:30px;
+padding:20px;
+max-width:900px;
+margin:auto;
 }
+
 h1{
 color:gold;
+text-align:center;
 }
+
 .card{
 background:#111;
 padding:20px;
-margin:15px;
+margin:15px 0;
 border-radius:15px;
+}
+
+input{
+width:100%;
+padding:12px;
+margin:5px 0;
+background:#222;
+color:white;
+border:1px solid #444;
+border-radius:8px;
+box-sizing:border-box;
+}
+
+button{
+background:gold;
+color:black;
+font-weight:bold;
+padding:12px;
+border:none;
+border-radius:8px;
+width:100%;
+margin-top:10px;
+}
+
+table{
+width:100%;
+border-collapse:collapse;
+margin-top:15px;
+}
+
+th,td{
+padding:10px;
+border-bottom:1px solid #333;
+text-align:left;
+}
+
+.delete{
+background:#b00020;
+color:white;
+padding:5px 10px;
+border:none;
+border-radius:5px;
 }
 </style>
 </head>
@@ -28,19 +75,126 @@ border-radius:15px;
 <h1>Monaco Finance AI</h1>
 
 <div class="card">
+
+<h2>Add Position</h2>
+
+<input id="ticker" placeholder="Ticker">
+<input id="isin" placeholder="ISIN">
+<input id="qty" placeholder="Quantity">
+<input id="price" placeholder="Purchase Price">
+<input id="bank" placeholder="Bank">
+
+<button onclick="addPosition()">
+Add Position
+</button>
+
+</div>
+
+<div class="card">
+
 <h2>Portfolio</h2>
-<p>Coming Soon</p>
+
+<table id="portfolioTable">
+<thead>
+<tr>
+<th>Ticker</th>
+<th>ISIN</th>
+<th>Qty</th>
+<th>Price</th>
+<th>Bank</th>
+<th></th>
+</tr>
+</thead>
+<tbody></tbody>
+</table>
+
 </div>
 
-<div class="card">
-<h2>AI Assistant</h2>
-<p>Coming Soon</p>
-</div>
+<script>
 
-<div class="card">
-<h2>Market News</h2>
-<p>Coming Soon</p>
-</div>
+let portfolio =
+JSON.parse(localStorage.getItem("portfolio")) || [];
+
+function savePortfolio(){
+localStorage.setItem(
+"portfolio",
+JSON.stringify(portfolio)
+);
+}
+
+function renderPortfolio(){
+
+let tbody =
+document.querySelector(
+"#portfolioTable tbody"
+);
+
+tbody.innerHTML="";
+
+portfolio.forEach((item,index)=>{
+
+tbody.innerHTML += `
+<tr>
+<td>${item.ticker}</td>
+<td>${item.isin}</td>
+<td>${item.qty}</td>
+<td>${item.price}</td>
+<td>${item.bank}</td>
+<td>
+<button class="delete"
+onclick="removePosition(${index})">
+X
+</button>
+</td>
+</tr>
+`;
+
+});
+
+}
+
+function addPosition(){
+
+portfolio.push({
+ticker:
+document.getElementById("ticker").value,
+
+isin:
+document.getElementById("isin").value,
+
+qty:
+document.getElementById("qty").value,
+
+price:
+document.getElementById("price").value,
+
+bank:
+document.getElementById("bank").value
+});
+
+savePortfolio();
+renderPortfolio();
+
+document.getElementById("ticker").value="";
+document.getElementById("isin").value="";
+document.getElementById("qty").value="";
+document.getElementById("price").value="";
+document.getElementById("bank").value="";
+}
+
+function removePosition(index){
+
+portfolio.splice(index,1);
+
+savePortfolio();
+
+renderPortfolio();
+
+}
+
+renderPortfolio();
+
+</script>
 
 </body>
 </html>
